@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百人一首</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: "Hiragino Mincho ProN", "ヒラギノ明朝 ProN", "Yu Mincho", "游明朝", serif;
+    background: linear-gradient(135deg, #f5f0e6 0%, #ebe0c8 100%);
+    color: #2c2416;
+    padding: 6px;
+    /* 全体: メイン領域 | UIパネル */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 8px;
+  }
+
+  /* メイン領域：左上=相手取札、右下=自分取札、中央右=場、中央=ボード */
+  .main-area {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) 110px 150px;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* 各サイドコーナー */
+  .corner {
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* 上側コーナー：札を上端に寄せる（相手取り札用） */
+  .corner.top { justify-content: flex-start; }
+  /* 下側コーナー：札を下端に寄せる（自分取り札用） */
+  .corner.bottom { justify-content: flex-end; }
+  .corner-stack {
+    position: relative;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    /* 札サイズと同等の領域を確保 */
+    flex: 0 0 auto;
+    width: 100%;
+    height: 100%;
+  }
+  .corner.top .corner-stack,
+  .corner.bottom .corner-stack {
+    /* 縦の高さは札サイズに依存（JSで設定） */
+    flex: 1;
+  }
+
+  /* ボードは中央列2段ぶち抜き */
+  .board-wrap {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    overflow: hidden;
+  }  .board {
+    display: grid;
+    grid-template-columns: repeat(5, auto);
+    grid-template-rows: repeat(4, auto);
+    /* 横の間隔をさらに広く */
+    gap: 4px 24px;
+  }
+  .board .row-2 { margin-bottom: -2px; }
+  .board .row-3 { margin-top: -2px; }
+
+  /* === 右端：UIパネル === */
+  .ui-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 8px;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .ui-panel h1 {
+    font-size: 20px;
+    letter-spacing: 0.15em;
+    color: #5c3a1e;
+    text-align: center;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #cbb98a;
+  }
+
+  /* レベル切替 */
+  .level-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255,255,255,0.5);
+    border: 2px solid #5c3a1e;
+    border-radius: 8px;
+    padding: 6px 8px;
+  }
+  .level-selector button {
+    background: none;
+    border: none;
+    font-size: 18px;
+    font-weight: bold;
+    color: #5c3a1e;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .level-selector button:hover { background: rgba(0,0,0,0.05); }
+  .level-selector button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .level-selector.locked button { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+  .level-selector .level-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #5c3a1e;
+    flex: 1;
+    text-align: center;
+  }
+
+  /* 試合中タブ無効化 */
+  .tab.locked {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .tabs-vertical { display: flex; flex-direction: column; gap: 6px; }
+  .tab {
+    padding: 10px 8px;
+    border: 2px solid #5c3a1e;
+    background: #fff;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 6px;
+    text-align: center;
+  }
+  .tab[data-color="blue"] { color: #2563a6; }
+  .tab[data-color="blue"].active { background: #2563a6; color: #fff; }
+  .tab[data-color="pink"] { color: #c94f7c; }
+  .tab[data-color="pink"].active { background: #c94f7c; color: #fff; }
+  .tab[data-color="yellow"] { color: #c89000; }
+  .tab[data-color="yellow"].active { background: #c89000; color: #fff; }
+  .tab[data-color="green"] { color: #3f8a4a; }
+  .tab[data-color="green"].active { background: #3f8a4a; color: #fff; }
+  .tab[data-color="orange"] { color: #d77326; }
+  .tab[data-color="orange"].active { background: #d77326; color: #fff; }
+
+  .score-info {
+    display: flex; flex-direction: column;
+    gap: 6px; font-size: 16px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 6px;
+  }
+  .score-info div { display: flex; justify-content: space-between; }
+  .score-info span { font-weight: bold; font-size: 18px; }
+  .start-btn {
+    padding: 14px;
+    font-family: inherit; font-size: 18px; font-weight: bold;
+    border: 2px solid #5c3a1e;
+    background: #fff5b0; color: #5c3a1e;
+    border-radius: 8px; cursor: pointer;
+  }
+  .start-btn:hover { background: #ffe666; }
+  .start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .reset-btn {
+    padding: 10px;
+    font-family: inherit; font-size: 14px;
+    border: 1px solid #5c3a1e;
+    background: #fff; color: #5c3a1e;
+    border-radius: 6px; cursor: pointer;
+  }
+  .record-btn {
+    padding: 8px;
+    font-family: inherit; font-size: 13px;
+    border: 1px solid #5c3a1e;
+    background: #f0e8d5; color: #5c3a1e;
+    border-radius: 6px; cursor: pointer;
+  }
+  .record-btn:hover { background: #e8dec0; }
+
+  .ta-timer-box {
+    background: #2c2416;
+    color: #fff5b0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+  }
+  .ta-timer-box .ta-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    margin-bottom: 2px;
+  }
+  .ta-timer-box .ta-time {
+    font-size: 22px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* 記録モーダル内のテーブル */
+  #records-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+  }
+  #records-content th, #records-content td {
+    padding: 6px 10px;
+    border: 1px solid #cbb98a;
+    text-align: center;
+  }
+  #records-content th {
+    background: #f0e8d5;
+    font-weight: bold;
+  }
+  #records-content h3 {
+    font-size: 18px;
+    color: #5c3a1e;
+    margin: 10px 0 8px;
+    border-bottom: 2px solid #cbb98a;
+    padding-bottom: 4px;
+  }
+  #records-content .best {
+    font-weight: bold;
+    color: #c94f7c;
+  }
+  .status-box {
+    background: rgba(255,255,255,0.7);
+    border: 1px solid #cbb98a;
+    border-radius: 6px;
+    padding: 10px; font-size: 13px;
+    color: #5c3a1e; line-height: 1.5;
+  }
+  .status-box.error { background: #fde0e0; border-color: #c94f4f; color: #c94f4f; }
+  .status-box .status-title { font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+  .speaker-icon { animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+
+  /* === カード === */
+  .card {
+    background: #e8f0f5;
+    border: 2px solid #6b8aa8;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    position: relative;
+    user-select: none;
+    transition: transform 0.12s, box-shadow 0.12s;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .card:hover:not(.taken):not(.disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    z-index: 2;
+  }
+  .card.flipped { background: #f5f0e0; }
+  .card.taken { visibility: hidden; }
+  .card.opponent-card { transform: rotate(180deg); }
+  .card.opponent-card:hover:not(.taken):not(.disabled) {
+    transform: rotate(180deg) translateY(-2px);
+  }
+  .card.dragging { opacity: 0.4; }
+  .card-img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    display: block;
+  }
+  .card-text {
+    font-size: 10px; color: #6b8aa8;
+    text-align: center; padding: 2px;
+    line-height: 1.2; font-weight: bold;
+    white-space: pre-line;
+  }
+
+  .corner-area {
+    position: relative;
+    min-height: 0;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* 重ねて表示する札 */
+  .stack-card {
+    position: absolute;
+    background: #f5f0e0;
+    border: 2px solid #6b8aa8;
+    border-radius: 5px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #5c3a1e;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+  }
+  .stack-card img { width: 100%; height: 100%; object-fit: cover; }
+  .stack-card.opponent { transform: rotate(180deg); }
+  .stack-card.selectable {
+    box-shadow: 0 0 0 2px #c94f4f, 1px 1px 3px rgba(0,0,0,0.2);
+    cursor: pointer;
+  }
+  .stack-card.selectable:hover { transform: scale(1.05); z-index: 100; }
+  .stack-card.selectable.opponent:hover { transform: rotate(180deg) scale(1.05); }
+
+  /* 勝敗モーダル */
+  .result-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .result-modal.show { display: flex; }
+  .result-modal .result-box {
+    background: #fff8e1;
+    border: 4px solid #5c3a1e;
+    border-radius: 16px;
+    padding: 40px 80px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    animation: bounceIn 0.5s ease-out;
+  }
+  @keyframes bounceIn {
+    0% { transform: scale(0.3); opacity: 0; }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .result-box .result-title {
+    font-size: 64px;
+    font-weight: bold;
+    color: #5c3a1e;
+    margin-bottom: 20px;
+    letter-spacing: 0.1em;
+  }
+  .result-box .result-title.win { color: #c94f7c; }
+  .result-box .result-title.lose { color: #2563a6; }
+  .result-box .result-title.draw { color: #8b7340; }
+  .result-box .result-score {
+    font-size: 28px;
+    color: #5c3a1e;
+    margin-bottom: 20px;
+  }
+  .result-box .result-close {
+    margin-top: 16px;
+    padding: 12px 32px;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: bold;
+    border: 2px solid #5c3a1e;
+    background: #fff5b0;
+    color: #5c3a1e;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .result-box .result-close:hover { background: #ffe666; }
+</style>
+</head>
+<body>
+
+<div class="main-area">
+  <!-- 左上：相手の取り札（上に寄せる） -->
+  <div class="corner top" style="grid-column: 1; grid-row: 1;">
+    <div class="corner-stack" id="opponent-taken"></div>
+  </div>
+
+  <!-- 左下：空き -->
+  <div class="corner" style="grid-column: 1; grid-row: 2;"></div>
+
+  <!-- 中央：ボード（2段ぶち抜き） -->
+  <div class="board-wrap">
+    <div class="board" id="board"></div>
+  </div>
+
+  <!-- 右中央（2段ぶち抜き）：場（お手つき札） -->
+  <div class="corner" style="grid-column: 3; grid-row: 1 / span 2; display: flex; align-items: center; justify-content: center; padding: 0;">
+    <div class="corner-stack" id="foul-area" style="width: auto; height: auto; min-width: 60px; min-height: 90px;"></div>
+  </div>
+
+  <!-- 右下：自分の取り札（下に寄せる） -->
+  <div class="corner bottom" style="grid-column: 4; grid-row: 2;">
+    <div class="corner-stack" id="player-taken"></div>
+  </div>
+
+  <!-- 右上：空き -->
+  <div class="corner" style="grid-column: 4; grid-row: 1;"></div>
+</div>
+
+<div class="ui-panel">
+  <h1>百人一首</h1>
+  <div class="level-selector" id="level-selector">
+    <button id="level-prev">◀</button>
+    <div class="level-name" id="level-name">初級</div>
+    <button id="level-next">▶</button>
+  </div>
+  <div class="tabs-vertical">
+    <button class="tab active" data-color="blue">青</button>
+    <button class="tab" data-color="pink">ピンク</button>
+    <button class="tab" data-color="yellow">黄</button>
+    <button class="tab" data-color="green">緑</button>
+    <button class="tab" data-color="orange">オレンジ</button>
+  </div>
+  <div class="score-info">
+    <div>あなた:<span id="player-score">0</span></div>
+    <div>相手:<span id="opponent-score">0</span></div>
+  </div>
+  <div class="ta-timer-box" id="ta-timer-box" style="display:none;">
+    <div class="ta-label">タイム</div>
+    <div class="ta-time" id="ta-timer">0.00秒</div>
+  </div>
+  <button class="start-btn" id="start-btn">スタート</button>
+  <button class="reset-btn" id="reset-btn">リセット</button>
+  <button class="record-btn" id="record-btn">記録を見る</button>
+  <div class="status-box" id="status-box">
+    <div class="status-title">操作</div>
+    <div id="status-msg">並べ替え可能</div>
+  </div>
+</div>
+
+<audio id="audio-player"></audio>
+
+<!-- 勝敗モーダル -->
+<div class="result-modal" id="result-modal">
+  <div class="result-box">
+    <div class="result-title" id="result-title"></div>
+    <div class="result-score" id="result-score"></div>
+    <button class="result-close" id="result-close">OK</button>
+  </div>
+</div>
+
+<!-- 記録モーダル -->
+<div class="result-modal" id="records-modal">
+  <div class="result-box" style="padding: 30px 40px; max-width: 90vw; max-height: 85vh; overflow-y: auto;">
+    <div style="font-size: 28px; font-weight: bold; color: #5c3a1e; margin-bottom: 20px; text-align: center; letter-spacing: 0.1em;">記録一覧</div>
+    <div id="records-content" style="text-align: left; font-size: 16px; color: #2c2416;"></div>
+    <div style="text-align: center; margin-top: 20px;">
+      <button class="result-close" id="records-clear">記録をすべて消す</button>
+      <button class="result-close" id="records-close">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLORS = {
+  blue:   { name: '青',       prefix: 'ao',     audioPrefix: 'ao'     },
+  pink:   { name: 'ピンク',   prefix: 'pink',   audioPrefix: 'momo'   },
+  yellow: { name: '黄',       prefix: 'ki',     audioPrefix: 'ki'     },
+  green:  { name: '緑',       prefix: 'green',  audioPrefix: 'midori' },
+  orange: { name: 'オレンジ', prefix: 'orange', audioPrefix: 'daidai' }
+};
+
+// レベル設定：相手が札を取りに来るタイミング
+// type: 'end' = 音声終了後、 'time' = 音声開始からのミリ秒、 'timeattack' = タイムアタック(相手なし)
+const LEVELS = [
+  { id: 'beginner',     name: '初級',         type: 'end',        delay: 0    },
+  { id: 'intermediate', name: '中級',         type: 'time',       delay: 4000 },
+  { id: 'advanced',     name: '上級',         type: 'time',       delay: 1500 },
+  { id: 'timeattack',   name: 'タイムアタック', type: 'timeattack', delay: 0    }
+];
+let currentLevelIdx = 0;
+
+// === 記録（localStorage に保存） ===
+const RECORDS_KEY = 'hyakunin_records_v1';
+let Records = loadRecords();
+
+function loadRecords() {
+  try {
+    const raw = localStorage.getItem(RECORDS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { console.warn('記録読み込み失敗', e); }
+  return {};
+}
+function saveRecords() {
+  try {
+    localStorage.setItem(RECORDS_KEY, JSON.stringify(Records));
+  } catch (e) { console.warn('記録保存失敗', e); }
+}
+function recordKey(color, levelId) {
+  return `${color}:${levelId}`;
+}
+function getRecord(color, levelId) {
+  const k = recordKey(color, levelId);
+  if (!Records[k]) Records[k] = { win: 0, lose: 0, bestTimeMs: null };
+  return Records[k];
+}
+function addWinLose(color, levelId, isWin) {
+  const r = getRecord(color, levelId);
+  if (isWin) r.win++; else r.lose++;
+  saveRecords();
+}
+function updateBestTime(color, levelId, timeMs) {
+  const r = getRecord(color, levelId);
+  if (r.bestTimeMs === null || timeMs < r.bestTimeMs) {
+    r.bestTimeMs = timeMs;
+    saveRecords();
+    return true;  // 新記録
+  }
+  return false;
+}
+function formatTime(ms) {
+  if (ms === null || ms === undefined) return '--';
+  const sec = Math.floor(ms / 1000);
+  const dec = Math.floor((ms % 1000) / 10);
+  return `${sec}.${String(dec).padStart(2, '0')}秒`;
+}
+
+function cardImgUrl(color, side, num) {
+  const p = COLORS[color].prefix;
+  return `https://github.com/byakusen/geogelglegeo/blob/main/${p}${side}${String(num).padStart(2,'0')}.jpg?raw=true`;
+}
+function cardAudioUrl(color, num) {
+  const p = COLORS[color].audioPrefix;
+  return `https://github.com/byakusen/gogeogelgege.hyakuninisshu_onsei/raw/refs/heads/main/${p}${String(num).padStart(2,'0')}.mp3`;
+}
+
+const State = { currentColor: 'blue', games: {}, cardSize: { w: 100, h: 150 } };
+
+function newGameState() {
+  return {
+    board: [],
+    foulCards: [],
+    playerTaken: [],
+    opponentTaken: [],
+    readOrder: [],
+    currentReadIndex: -1,
+    started: false,
+    currentReadingNum: null,
+    foulThisRound: { player: false, opponent: false },
+    playerOwedSkips: 0,  // 取り札がないお手つきによる「貸し」（次ラウンドも休む回数）
+    selectingFoulCard: false,
+    nextCardTimer: null,
+    opponentReactionTimer: null,
+    audioSafetyTimer: null,
+    audioFallbackTimer: null,
+    // タイムアタック用
+    isTimeAttack: false,
+    taStartTime: null,
+    taPenaltyMs: 0,
+    taTimerInterval: null,
+    taFinishTime: null
+  };
+}
+Object.keys(COLORS).forEach(c => { State.games[c] = newGameState(); });
+
+function initBoard(color) {
+  const g = State.games[color];
+  const allNums = Array.from({length: 20}, (_, i) => i + 1);
+  shuffle(allNums);
+  g.board = [];
+  for (let r = 0; r < 4; r++) {
+    const row = [];
+    for (let c = 0; c < 5; c++) {
+      const num = allNums[r * 5 + c];
+      const isOpponent = (r < 2);
+      row.push({ num, flipped: false, taken: false, isOpponent });
+    }
+    g.board.push(row);
+  }
+  const readSequence = [...allNums];
+  shuffle(readSequence);
+  g.readOrder = readSequence.slice(0, 17);
+  g.currentReadIndex = -1;
+  g.started = false;
+  g.foulCards = [];
+  g.playerTaken = [];
+  g.opponentTaken = [];
+  g.foulThisRound = { player: false, opponent: false };
+  g.playerOwedSkips = 0;
+  g.selectingFoulCard = false;
+  g.currentReadingNum = null;
+  g.isTimeAttack = false;
+  g.taStartTime = null;
+  g.taPenaltyMs = 0;
+  if (g.taTimerInterval) { clearInterval(g.taTimerInterval); g.taTimerInterval = null; }
+  g.taFinishTime = null;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function calcCardSize() {
+  // ボードのラッパー要素から利用可能サイズを取る
+  const wraps = document.getElementsByClassName('board-wrap');
+  if (!wraps.length) return;
+  const rect = wraps[0].getBoundingClientRect();
+  // 横ギャップ24px×4=96px、縦ギャップ4px×3=12px
+  const availW = Math.max(50, rect.width - 24 * 4);
+  const availH = Math.max(50, rect.height - 4 * 3);
+  const cardW1 = availW / 5;
+  const cardH1 = availH / 4;
+  let cardW, cardH;
+  if (cardW1 * 1.5 <= cardH1) {
+    cardW = cardW1;
+    cardH = cardW1 * 1.5;
+  } else {
+    cardH = cardH1;
+    cardW = cardH1 / 1.5;
+  }
+  State.cardSize = { w: Math.max(20, Math.floor(cardW)), h: Math.max(30, Math.floor(cardH)) };
+}
+
+function render() {
+  calcCardSize();
+  const color = State.currentColor;
+  const g = State.games[color];
+  const level = LEVELS[currentLevelIdx];
+  const isTAMode = level.type === 'timeattack';
+
+  renderBoard(g, color);
+  renderFoul(g, color);
+  renderTaken(g, color);
+  document.getElementById('player-score').textContent = g.playerTaken.length;
+  document.getElementById('opponent-score').textContent = g.opponentTaken.length;
+
+  // タイムアタックモードではタイマー表示、対戦モードではスコア表示
+  const taBox = document.getElementById('ta-timer-box');
+  const scoreBox = document.querySelector('.score-info');
+  if (isTAMode) {
+    taBox.style.display = '';
+    if (scoreBox) scoreBox.style.display = 'none';
+    if (!g.started || !g.taStartTime) {
+      document.getElementById('ta-timer').textContent = '0.00秒';
+    }
+  } else {
+    taBox.style.display = 'none';
+    if (scoreBox) scoreBox.style.display = '';
+  }
+
+  const startBtn = document.getElementById('start-btn');
+  startBtn.disabled = g.started;
+  startBtn.textContent = g.started ? '進行中' : 'スタート';
+
+  // 試合進行中（読み終わってない）はレベル切替・色タブをロック
+  const inProgress = isInProgress();
+  const levelSel = document.getElementById('level-selector');
+  if (levelSel) levelSel.classList.toggle('locked', inProgress);
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('locked', inProgress);
+  });
+
+  const statusBox = document.getElementById('status-box');
+  const statusMsg = document.getElementById('status-msg');
+  statusBox.classList.remove('error');
+
+  // 進行状況のテキスト
+  let progressText = '';
+  if (g.started && g.currentReadIndex >= 0 && g.currentReadIndex < g.readOrder.length) {
+    progressText = `<div style="margin-bottom:6px;"><span class="speaker-icon">🔊</span> ${g.currentReadIndex + 1}枚目 / ${g.readOrder.length}枚</div>`;
+  } else if (g.started && g.currentReadIndex >= g.readOrder.length) {
+    progressText = `<div style="margin-bottom:6px;"><strong>ゲーム終了</strong></div>`;
+  }
+
+  if (g.foulThisRound.player && g.started) {
+    statusBox.classList.add('error');
+    let msg = 'お手つき！この回は取れません';
+    if (g.playerOwedSkips > 0) {
+      msg += `<br>（あと${g.playerOwedSkips}回休み）`;
+    }
+    statusMsg.innerHTML = progressText + msg;
+  } else if (!g.started) {
+    statusMsg.innerHTML = '並べ替え可能<br>（ドラッグで入れ替え／クリックで裏返し）';
+  } else {
+    statusMsg.innerHTML = progressText + '札を取ってください';
+  }
+}
+
+function renderBoard(g, color) {
+  const board = document.getElementById('board');
+
+  // 既存DOMがあり、かつ枚数・色などが一致していれば「差分更新」、そうでなければ「全再構築」
+  // _boardKey: 現在のボードを識別するキー（色・各札の番号・並び順）
+  const boardKey = color + ':' + g.board.flat().map(c => `${c.num}/${c.isOpponent ? 'o' : 'p'}`).join(',');
+  const needRebuild = board.dataset.boardKey !== boardKey || board.children.length !== 20;
+
+  if (needRebuild) {
+    // 構造が変わった（タブ切替・リセット・並べ替え）→ 全再構築
+    board.innerHTML = '';
+    board.dataset.boardKey = boardKey;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 5; c++) {
+        const card = g.board[r][c];
+        const el = document.createElement('div');
+        el.className = 'card' + (card.isOpponent ? ' opponent-card' : '');
+        el.classList.add(`row-${r}`);
+        el.dataset.r = r;
+        el.dataset.c = c;
+        const img = document.createElement('img');
+        img.className = 'card-img';
+        img.alt = '';
+        img.onerror = () => {
+          if (el.querySelector('.card-text')) return;
+          const txt = document.createElement('div');
+          txt.className = 'card-text';
+          txt.textContent = `${COLORS[color].name}\n${card.num}`;
+          el.appendChild(txt);
+        };
+        el.appendChild(img);
+        el.addEventListener('click', () => {
+          const r2 = parseInt(el.dataset.r);
+          const c2 = parseInt(el.dataset.c);
+          onCardClick(r2, c2);
+        });
+        // ドラッグハンドラ（毎フレーム再登録する必要があるかは後述：started状態で変わる）
+        el.addEventListener('dragstart', (e) => {
+          const r2 = parseInt(el.dataset.r);
+          const c2 = parseInt(el.dataset.c);
+          e.dataTransfer.setData('text/plain', `${r2},${c2}`);
+          el.classList.add('dragging');
+          // ドラッグ中はその札を表向きに戻す
+          const draggedCard = g.board[r2][c2];
+          if (draggedCard.flipped) {
+            draggedCard.flipped = false;
+            render();
+          }
+        });
+        el.addEventListener('dragend', () => el.classList.remove('dragging'));
+        el.addEventListener('dragover', (e) => e.preventDefault());
+        el.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const [fr, fc] = e.dataTransfer.getData('text/plain').split(',').map(Number);
+          const r2 = parseInt(el.dataset.r);
+          const c2 = parseInt(el.dataset.c);
+          if (fr === r2 && fc === c2) return;
+          const fromCard = g.board[fr][fc];
+          const toCard = g.board[r2][c2];
+          if (fromCard.isOpponent || toCard.isOpponent) return;
+          if (g.started) return;
+          g.board[fr][fc] = toCard;
+          g.board[r2][c2] = fromCard;
+          render();
+        });
+        board.appendChild(el);
+      }
+    }
+  }
+
+  // すべての札について状態を更新（DOM自体は再作成しない）
+  let idx = 0;
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 5; c++) {
+      const card = g.board[r][c];
+      const el = board.children[idx];
+      idx++;
+
+      // サイズ更新
+      el.style.width = State.cardSize.w + 'px';
+      el.style.height = State.cardSize.h + 'px';
+
+      // taken/disabled クラス
+      el.classList.toggle('taken', card.taken);
+      el.classList.toggle('disabled', g.selectingFoulCard);
+
+      // draggable 属性は started 状態に応じて変える
+      el.draggable = (!card.isOpponent && !g.started);
+
+      // 画像が必要なら設定（src が違うときだけ更新）
+      const side = card.flipped ? 2 : 1;
+      const url = cardImgUrl(color, side, card.num);
+      const img = el.querySelector('img');
+      if (img && img.src !== url) {
+        // テキストフォールバックがあれば削除
+        const txt = el.querySelector('.card-text');
+        if (txt) txt.remove();
+        img.src = url;
+      }
+    }
+  }
+}
+
+// 取り札・場札の差分レンダリング用ヘルパー
+// 既存のDOMはそのまま、追加された札だけ新規作成。減った場合は末尾を削除。
+function renderStack(container, cards, color, side, opponent, posMode) {
+  // posMode: 'top' or 'bottom'
+  const w = State.cardSize.w;
+  const h = State.cardSize.h;
+  const offsetX = 1;
+  const offsetY = 1;
+
+  // 既存DOM + 追加予定（非同期で追加中の枚数）の合計を「実質的な枚数」とみなす
+  const pending = parseInt(container.dataset.pendingCount || '0');
+  let effectiveCount = container.children.length + pending;
+
+  // cards数より多くなった場合は末尾DOMを削除（pendingは触れない）
+  while (container.children.length + pending > cards.length && container.children.length > 0) {
+    container.removeChild(container.lastChild);
+    effectiveCount--;
+  }
+
+  // 既存DOMの位置・サイズを更新
+  for (let i = 0; i < container.children.length; i++) {
+    const el = container.children[i];
+    el.dataset.cardIdx = i;
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.left = (i * offsetX) + 'px';
+    if (posMode === 'bottom') {
+      el.style.bottom = (i * offsetY) + 'px';
+      el.style.top = '';
+    } else {
+      el.style.top = (i * offsetY) + 'px';
+      el.style.bottom = '';
+    }
+    el.style.zIndex = i;
+  }
+
+  // 新しい札：画像を先にロードし、ロード完了後にDOMをコンテナへ追加
+  for (let i = effectiveCount; i < cards.length; i++) {
+    const c = cards[i];
+    const url = cardImgUrl(color, side, c.num);
+    const cardIdx = i;  // 追加順を固定（カード配列内の位置）
+
+    // 追加予定カウンタをインクリメント（連続呼び出し時の2重追加防止）
+    container.dataset.pendingCount = String(parseInt(container.dataset.pendingCount || '0') + 1);
+
+    const addToContainer = (imgElem, isFallback) => {
+      // 追加予定カウンタを減らす
+      const cur = parseInt(container.dataset.pendingCount || '0');
+      container.dataset.pendingCount = String(Math.max(0, cur - 1));
+
+      const el = document.createElement('div');
+      el.className = 'stack-card' + (opponent ? ' opponent' : '');
+      el.dataset.cardIdx = cardIdx;
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
+      el.style.left = (cardIdx * offsetX) + 'px';
+      if (posMode === 'bottom') {
+        el.style.bottom = (cardIdx * offsetY) + 'px';
+      } else {
+        el.style.top = (cardIdx * offsetY) + 'px';
+      }
+      el.style.zIndex = cardIdx;
+      if (isFallback) {
+        el.innerHTML = c.num;
+      } else {
+        el.appendChild(imgElem);
+      }
+      // 正しい位置に挿入（後から取った札がDOM上で後ろになるよう、cardIdxで順序保持）
+      let inserted = false;
+      for (let k = 0; k < container.children.length; k++) {
+        const childIdx = parseInt(container.children[k].dataset.cardIdx || '0');
+        if (childIdx > cardIdx) {
+          container.insertBefore(el, container.children[k]);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) container.appendChild(el);
+    };
+
+    // 画像をプリロード
+    const pre = new Image();
+    let added = false;
+    const doAdd = (isFallback) => {
+      if (added) return;
+      added = true;
+      if (isFallback) {
+        addToContainer(null, true);
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        addToContainer(img, false);
+      }
+    };
+    pre.onload = () => doAdd(false);
+    pre.onerror = () => doAdd(true);
+    pre.src = url;
+
+    if (pre.complete && pre.naturalWidth > 0) {
+      doAdd(false);
+    }
+  }
+}
+
+function renderFoul(g, color) {
+  const fa = document.getElementById('foul-area');
+  const w = State.cardSize.w;
+  const h = State.cardSize.h;
+  fa.style.width = w + 'px';
+  fa.style.height = h + 'px';
+  // 場の札は裏面(side=2)で表示
+  renderStack(fa, g.foulCards, color, 2, false, 'top');
+}
+
+function renderTaken(g, color) {
+  const pt = document.getElementById('player-taken');
+  const ot = document.getElementById('opponent-taken');
+  // 自分の取り札は下寄せ、相手の取り札は上寄せ、ともに裏面
+  renderStack(pt, g.playerTaken, color, 2, false, 'bottom');
+  renderStack(ot, g.opponentTaken, color, 2, true, 'top');
+}
+
+function onCardClick(r, c) {
+  const color = State.currentColor;
+  const g = State.games[color];
+  const card = g.board[r][c];
+  if (card.taken) return;
+  if (g.selectingFoulCard) return;
+
+  if (!g.started) {
+    // 一度に裏返せるのは1枚だけ。他の札は表に戻す。
+    const wasFlipped = card.flipped;
+    for (let rr = 0; rr < 4; rr++) {
+      for (let cc = 0; cc < 5; cc++) {
+        g.board[rr][cc].flipped = false;
+      }
+    }
+    // 元が裏なら表に戻す（クリックで解除）、元が表なら裏にする
+    card.flipped = !wasFlipped;
+    render();
+    return;
+  }
+
+  if (g.foulThisRound.player) return;
+  if (g.currentReadIndex < 0 || g.currentReadIndex >= g.readOrder.length) return;
+
+  if (card.num === g.currentReadingNum) {
+    takeCard('player', r, c);
+  } else {
+    g.foulThisRound.player = true;
+    if (g.isTimeAttack) {
+      // タイムアタック：+3秒ペナルティ
+      g.taPenaltyMs += 3000;
+      // 音声が既に詠み終わっている場合は、ここで次の札へ進める
+      // （まだ再生中なら、onAudioEndが詠み終わってから進めてくれる）
+      if (audio.ended) {
+        if (!g.nextCardTimer) {
+          g.nextCardTimer = setTimeout(() => {
+            g.nextCardTimer = null;
+            playNextCard(State.currentColor);
+          }, 500);
+        }
+      }
+    } else {
+      // 対戦モード：取り札があれば一番上を場に出す。なければ「借り」が1増える
+      if (g.playerTaken.length > 0) {
+        const removed = g.playerTaken.pop();
+        g.foulCards.push({ num: removed.num, source: 'player', addedThisRound: true });
+      } else {
+        g.playerOwedSkips += 1;
+      }
+    }
+    // 音声は止めず、相手は引き続き取りに行ける（タイムアタックは音声最後まで詠む）
+    render();
+  }
+}
+
+function takeCard(taker, r, c) {
+  const color = State.currentColor;
+  const g = State.games[color];
+  const card = g.board[r][c];
+  card.taken = true;
+  const takenList = taker === 'player' ? g.playerTaken : g.opponentTaken;
+  takenList.push({ num: card.num });
+  // 場の札を1枚もらう（ただし「このラウンドで追加された」札はスキップ）
+  const eligibleIdx = g.foulCards.findIndex(fc => !fc.addedThisRound);
+  if (eligibleIdx >= 0) {
+    const fc = g.foulCards.splice(eligibleIdx, 1)[0];
+    takenList.push({ num: fc.num });
+  }
+  stopAudio();
+  clearTimeout(g.nextCardTimer);
+  clearTimeout(g.opponentReactionTimer);
+  g.nextCardTimer = setTimeout(() => {
+    g.nextCardTimer = null;
+    playNextCard(color);
+  }, 500);
+  render();
+}
+
+const audio = document.getElementById('audio-player');
+
+function stopAudio() {
+  audio.pause();
+  audio.currentTime = 0;
+  const g = State.games[State.currentColor];
+  clearTimeout(g.opponentReactionTimer);
+  clearTimeout(g.audioSafetyTimer);
+  clearTimeout(g.audioFallbackTimer);
+}
+
+function startGame() {
+  const color = State.currentColor;
+  const g = State.games[color];
+  if (g.started) return;
+  g.started = true;
+  g.currentReadIndex = -1;
+  // 全ての札を表向きに戻す
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 5; c++) {
+      g.board[r][c].flipped = false;
+    }
+  }
+  // 裏面画像をすべてプリロード（取った札・お手つき札用）
+  for (let n = 1; n <= 20; n++) {
+    const pre = new Image();
+    pre.src = cardImgUrl(color, 2, n);
+  }
+  // タイムアタックモードかチェック
+  const level = LEVELS[currentLevelIdx];
+  if (level.type === 'timeattack') {
+    g.isTimeAttack = true;
+    g.taStartTime = Date.now();
+    g.taPenaltyMs = 0;
+    g.taFinishTime = null;
+    // 1/10秒ごとに表示更新
+    if (g.taTimerInterval) clearInterval(g.taTimerInterval);
+    g.taTimerInterval = setInterval(() => {
+      if (State.currentColor !== color) return;
+      // 終了済みなら更新しない（保険）
+      if (g.taFinishTime !== null) return;
+      // タイマー表示を更新
+      const ttEl = document.getElementById('ta-timer');
+      if (ttEl) {
+        const elapsed = Date.now() - g.taStartTime + g.taPenaltyMs;
+        ttEl.textContent = formatTime(elapsed);
+      }
+    }, 100);
+  } else {
+    g.isTimeAttack = false;
+  }
+  render();
+  setTimeout(() => playNextCard(color), 500);
+}
+
+function playNextCard(color) {
+  const g = State.games[color];
+  if (color !== State.currentColor) return;
+  g.currentReadIndex++;
+  g.foulThisRound = { player: false, opponent: false };
+  // 「借り」があれば、このラウンドも自動的に休み
+  if (g.playerOwedSkips > 0) {
+    g.foulThisRound.player = true;
+    g.playerOwedSkips -= 1;
+  }
+  // 場の札に「このラウンドで追加された」フラグがあれば、それを解除
+  g.foulCards.forEach(fc => { fc.addedThisRound = false; });
+  if (g.currentReadIndex >= g.readOrder.length) {
+    g.currentReadingNum = null;
+    g.started = false;  // ゲーム終了。再スタート可能に
+    // タイムアタックのタイマーを停止
+    if (g.taTimerInterval) { clearInterval(g.taTimerInterval); g.taTimerInterval = null; }
+    render();
+    showResultModal(g);
+    return;
+  }
+  const num = g.readOrder[g.currentReadIndex];
+  g.currentReadingNum = num;
+  render();
+  audio.src = cardAudioUrl(color, num);
+
+  const level = LEVELS[currentLevelIdx];
+
+  // 相手が取りに来る処理（レベルに応じてタイミングが違う）
+  const triggerOpponentTake = () => {
+    if (color !== State.currentColor) return;
+    if (g.currentReadingNum !== num) return;
+    clearTimeout(g.opponentReactionTimer);
+    g.opponentReactionTimer = setTimeout(() => {
+      if (g.currentReadingNum !== num) return;
+      attemptOpponentTake(color, num);
+    }, 300);
+  };
+
+  // 音声の最終終了処理（音声が終わったら必ず次の札へ進む保険）
+  const onAudioEnd = () => {
+    if (color !== State.currentColor) return;
+    if (g.currentReadingNum !== num) return;
+    // 初級は音声終了時に相手が取りに来る。それ以外は既に取っているか、取らずに次へ
+    if (level.type === 'end') {
+      triggerOpponentTake();
+    } else if (level.type === 'timeattack') {
+      // タイムアタック：正解札を取るまでは進まない。
+      // ただしお手つきしていた場合は、音声を最後まで詠み切ってから次へ進む。
+      if (g.foulThisRound.player) {
+        if (g.nextCardTimer) return;
+        g.nextCardTimer = setTimeout(() => {
+          g.nextCardTimer = null;
+          playNextCard(color);
+        }, 500);
+      }
+      // お手つきしていない場合は何もしない（プレイヤーが取るまで待ち）
+    } else {
+      // 中級・上級：すでに取られているか、お手つき後に音声終了したら次へ
+      if (g.nextCardTimer) return;  // 既にタイマー稼働中なら何もしない
+      g.nextCardTimer = setTimeout(() => {
+        g.nextCardTimer = null;
+        playNextCard(color);
+      }, 500);
+    }
+  };
+
+  audio.onended = onAudioEnd;
+
+  // 中級・上級：音声開始から指定ミリ秒後に相手が取る
+  if (level.type === 'time') {
+    clearTimeout(g.opponentReactionTimer);
+    g.opponentReactionTimer = setTimeout(() => {
+      if (color !== State.currentColor) return;
+      if (g.currentReadingNum !== num) return;
+      attemptOpponentTake(color, num);
+    }, level.delay);
+  }
+
+  // 音声のメタデータ読み込み後、長さ + 0.5秒で強制進行（onendedの保険）
+  audio.onloadedmetadata = () => {
+    if (color !== State.currentColor) return;
+    if (g.currentReadingNum !== num) return;
+    const duration = (audio.duration && isFinite(audio.duration)) ? audio.duration : 8;
+    clearTimeout(g.audioSafetyTimer);
+    g.audioSafetyTimer = setTimeout(() => {
+      if (color !== State.currentColor) return;
+      if (g.currentReadingNum !== num) return;
+      onAudioEnd();
+    }, (duration + 0.5) * 1000);
+  };
+
+  // 最終保険（12秒で進む）
+  clearTimeout(g.audioFallbackTimer);
+  g.audioFallbackTimer = setTimeout(() => {
+    if (color !== State.currentColor) return;
+    if (g.currentReadingNum !== num) return;
+    onAudioEnd();
+  }, 12000);
+
+  audio.play().catch(e => {
+    console.warn('音声再生失敗', e);
+    setTimeout(() => {
+      if (color !== State.currentColor) return;
+      if (g.currentReadingNum !== num) return;
+      onAudioEnd();
+    }, 3000);
+  });
+}
+
+function findCard(g, num) {
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 5; c++) {
+      if (!g.board[r][c].taken && g.board[r][c].num === num) {
+        return { r, c };
+      }
+    }
+  }
+  return null;
+}
+
+function attemptOpponentTake(color, num) {
+  const g = State.games[color];
+  // すでに次のラウンドへ進むタイマーが動いていれば、何もしない
+  // （プレイヤーが取った直後など）
+  if (g.nextCardTimer) {
+    return;
+  }
+  const pos = findCard(g, num);
+  if (pos) {
+    takeCard('opponent', pos.r, pos.c);
+  } else {
+    clearTimeout(g.nextCardTimer);
+    g.nextCardTimer = setTimeout(() => {
+      g.nextCardTimer = null;
+      playNextCard(color);
+    }, 500);
+  }
+}
+
+function showResultModal(g) {
+  const modal = document.getElementById('result-modal');
+  const title = document.getElementById('result-title');
+  const score = document.getElementById('result-score');
+  const color = State.currentColor;
+  const level = LEVELS[currentLevelIdx];
+
+  if (g.isTimeAttack) {
+    // タイムアタックの結果
+    if (g.taTimerInterval) { clearInterval(g.taTimerInterval); g.taTimerInterval = null; }
+    const elapsed = (Date.now() - g.taStartTime) + g.taPenaltyMs;
+    g.taFinishTime = elapsed;
+    const isNew = updateBestTime(color, level.id, elapsed);
+    title.textContent = isNew ? '🎉 新記録！' : 'クリア！';
+    title.className = 'result-title ' + (isNew ? 'win' : 'draw');
+    const best = getRecord(color, level.id).bestTimeMs;
+    score.innerHTML = `タイム: <strong>${formatTime(elapsed)}</strong>` +
+      (g.taPenaltyMs > 0 ? `<br><small>（お手つきペナルティ: +${g.taPenaltyMs/1000}秒）</small>` : '') +
+      `<br><small>最高記録: ${formatTime(best)}</small>`;
+  } else {
+    // 対戦モードの結果
+    const p = g.playerTaken.length;
+    const o = g.opponentTaken.length;
+    if (p > o) {
+      title.textContent = 'あなたの勝ち！';
+      title.className = 'result-title win';
+      addWinLose(color, level.id, true);
+    } else if (p < o) {
+      title.textContent = 'あなたの負け…';
+      title.className = 'result-title lose';
+      addWinLose(color, level.id, false);
+    } else {
+      title.textContent = '引き分け';
+      title.className = 'result-title draw';
+      // 引き分けは勝敗カウントに含めない
+    }
+    score.textContent = `あなた ${p}枚　／　相手 ${o}枚`;
+  }
+  modal.classList.add('show');
+}
+
+function hideResultModal() {
+  document.getElementById('result-modal').classList.remove('show');
+}
+
+// 記録モーダル
+function showRecordsModal() {
+  const content = document.getElementById('records-content');
+  let html = '';
+
+  // 対戦モード（初級・中級・上級）
+  html += '<h3>対戦モード（勝/負）</h3>';
+  html += '<table>';
+  html += '<tr><th>色</th>';
+  ['beginner', 'intermediate', 'advanced'].forEach(lvId => {
+    const lv = LEVELS.find(l => l.id === lvId);
+    html += `<th>${lv.name}</th>`;
+  });
+  html += '</tr>';
+  Object.keys(COLORS).forEach(c => {
+    html += `<tr><td>${COLORS[c].name}</td>`;
+    ['beginner', 'intermediate', 'advanced'].forEach(lvId => {
+      const r = getRecord(c, lvId);
+      html += `<td>${r.win} / ${r.lose}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+
+  // タイムアタック
+  html += '<h3>タイムアタック（最高記録）</h3>';
+  html += '<table>';
+  html += '<tr><th>色</th><th>最高記録</th></tr>';
+  Object.keys(COLORS).forEach(c => {
+    const r = getRecord(c, 'timeattack');
+    const best = r.bestTimeMs;
+    html += `<tr><td>${COLORS[c].name}</td><td class="best">${best === null ? '--' : formatTime(best)}</td></tr>`;
+  });
+  html += '</table>';
+
+  content.innerHTML = html;
+  document.getElementById('records-modal').classList.add('show');
+}
+function hideRecordsModal() {
+  document.getElementById('records-modal').classList.remove('show');
+}
+function clearAllRecords() {
+  if (!confirm('すべての記録を消します。よろしいですか？')) return;
+  Records = {};
+  saveRecords();
+  showRecordsModal();  // 再描画
+}
+
+function switchColor(color) {
+  stopAudio();
+  const prevG = State.games[State.currentColor];
+  clearTimeout(prevG.nextCardTimer);
+  clearTimeout(prevG.opponentReactionTimer);
+  clearTimeout(prevG.audioSafetyTimer);
+  clearTimeout(prevG.audioFallbackTimer);
+  if (prevG.taTimerInterval) { clearInterval(prevG.taTimerInterval); prevG.taTimerInterval = null; }
+  prevG.nextCardTimer = null;
+  prevG.opponentReactionTimer = null;
+  prevG.audioSafetyTimer = null;
+  prevG.audioFallbackTimer = null;
+  State.currentColor = color;
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.color === color);
+  });
+  // 色が変わったので取り札・場札のDOMをクリア
+  ['player-taken', 'opponent-taken', 'foul-area'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = '';
+      el.dataset.pendingCount = '0';
+    }
+  });
+  // ボードのDOMもクリア（新しい色のボードに確実に切り替えるため）
+  const board = document.getElementById('board');
+  if (board) {
+    board.innerHTML = '';
+    delete board.dataset.boardKey;
+  }
+  const g = State.games[color];
+  if (g.board.length === 0) initBoard(color);
+  render();
+}
+
+function resetCurrent() {
+  stopAudio();
+  const color = State.currentColor;
+  const g = State.games[color];
+  clearTimeout(g.nextCardTimer);
+  clearTimeout(g.opponentReactionTimer);
+  clearTimeout(g.audioSafetyTimer);
+  clearTimeout(g.audioFallbackTimer);
+  if (g.taTimerInterval) { clearInterval(g.taTimerInterval); g.taTimerInterval = null; }
+  // 取り札・場札のDOMもクリア（pendingCountも0に戻す）
+  ['player-taken', 'opponent-taken', 'foul-area'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = '';
+      el.dataset.pendingCount = '0';
+    }
+  });
+  // ボードのDOMもクリア（新しい盤面に確実に切り替えるため）
+  const board = document.getElementById('board');
+  if (board) {
+    board.innerHTML = '';
+    delete board.dataset.boardKey;
+  }
+  State.games[color] = newGameState();
+  initBoard(color);
+  render();
+}
+
+// 現在のゲームが進行中かどうかを返す
+// 通常モード：スタート〜全札詠み終わるまで
+// タイムアタック：スタート〜全札取り切るまで（taFinishTimeがnullの間）
+function isInProgress() {
+  const g = State.games[State.currentColor];
+  if (!g || !g.started) return false;
+  if (g.isTimeAttack) {
+    // タイムアタックは結果モーダルが出るまで（taFinishTimeが入るまで）進行中
+    return g.taFinishTime === null;
+  }
+  return g.currentReadIndex < g.readOrder.length;
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (isInProgress()) return;
+    hideResultModal();
+    switchColor(t.dataset.color);
+  });
+});
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('reset-btn').addEventListener('click', () => { hideResultModal(); resetCurrent(); });
+document.getElementById('result-close').addEventListener('click', hideResultModal);
+document.getElementById('record-btn').addEventListener('click', () => {
+  // 進行中でも記録は見れていい
+  showRecordsModal();
+});
+document.getElementById('records-close').addEventListener('click', hideRecordsModal);
+document.getElementById('records-clear').addEventListener('click', clearAllRecords);
+
+// レベル切替
+function updateLevelDisplay() {
+  document.getElementById('level-name').textContent = LEVELS[currentLevelIdx].name;
+  document.getElementById('level-prev').disabled = currentLevelIdx === 0;
+  document.getElementById('level-next').disabled = currentLevelIdx === LEVELS.length - 1;
+}
+document.getElementById('level-prev').addEventListener('click', () => {
+  if (isInProgress()) return;
+  if (currentLevelIdx > 0) {
+    currentLevelIdx--;
+    updateLevelDisplay();
+  }
+});
+document.getElementById('level-next').addEventListener('click', () => {
+  if (isInProgress()) return;
+  if (currentLevelIdx < LEVELS.length - 1) {
+    currentLevelIdx++;
+    updateLevelDisplay();
+  }
+});
+updateLevelDisplay();
+
+window.addEventListener('resize', () => render());
+
+initBoard('blue');
+setTimeout(() => render(), 50);
+</script>
+</body>
+</html>
